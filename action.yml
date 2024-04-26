@@ -1,0 +1,78 @@
+name: 'Create PR comments'
+description: 'Split file on chunks and create PR comments'
+inputs:
+  filename:
+    description: 'path to file'
+    required: true
+  content:
+    description: 'content of file'
+    required: false
+  title:
+    description: ''
+    required: false
+    default: 'Output'
+  chunk_size:
+    description: 'Chunk size (chars number)'
+    required: false
+    default: '32000'
+  summary:
+    description: 'Expandable block summary'
+    required: false
+  github_token:
+    description: 'GitHub token to authenticate'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Dump
+      if: ${{ inputs.content }}
+      env:
+        content: ${{inputs.content}}
+      shell: bash
+      run: echo "$content" > ${{inputs.filename}}
+
+    - name: Create PR
+      uses: actions/github-script@v6.4.0
+      env:
+        title: ${{inputs.title}}
+        summary: ${{inputs.summary}}
+        filename: ${{inputs.filename}}
+      with:
+        github-token: ${{inputs.github_token}}
+        script: |
+          const {readFileSync} = require('fs')
+
+          const title = process.env.title
+          const block_summary = process.env.summary
+          const str = readFileSync(process.env.filename, 'utf-8');
+          const len = ${{inputs.chunk_size}}
+          const size = Math.ceil(str.length/len)
+          const chunks = Array(size)
+          let offset = 0
+
+          for (let i = 0; i < size; i++) {
+            chunks[i] = str.substr(offset, len)
+            offset += len
+          }
+
+          for (var i = 0; i < chunks.length; i++) {
+            block_title = ''
+            if (i==0) {
+              block_title = `${title} (1 from ${chunks.length}):`
+            } else {
+              block_title = `Continue output (${i + 1} from ${chunks.length}):`
+            }
+            comment = block_title + '\n' +
+                      '<details>\n' +
+                      '<summary>' + block_summary + '</summary>\n\n' +
+                      '```\n' + chunks[i] + '\n```\n\n' +
+                      '</details>'
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            })
+          }
